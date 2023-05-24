@@ -223,109 +223,109 @@ def kernel_grads(net, gamma_train, device, batch_size=4):
 
 
 # ======================= active learning ===========================
-@torch.no_grad()
-def active_dpp(learner, dataset, data, labels, indices, ways, features, train_shots, test_shots,
-               cand_ratio=0.25, per_class=False):
-    learner.eval()
-    fmodel, params, buffers = make_functional_with_buffers(learner)
-
-    def _compute_loss(params, buffers, sample):
-        batch = sample.unsqueeze(0)
-        loss = torch.sum(fmodel(params, buffers, batch)) # sum to make 0-dim tensor
-        return loss
-
-    ft_compute_grad = grad(_compute_loss)
-    grad_vmap = vmap(ft_compute_grad, in_dims=(None, None, 0))
-
-    # data, labels, indices = batch
-
-    adaptation_indices_bool = np.zeros(len(indices), dtype=bool)
-    selection = np.arange(ways) * (train_shots + test_shots)
-    for offset in range(train_shots):
-        adaptation_indices_bool[selection + offset] = True
-    evaluation_indices_bool = ~adaptation_indices_bool
-    adaptation_labels, adaptation_indices =\
-        labels[adaptation_indices_bool], indices[adaptation_indices_bool]
-    evaluation_data, evaluation_labels, evaluation_indices =\
-        data[evaluation_indices_bool], labels[evaluation_indices_bool], indices[evaluation_indices_bool]
-    evaluation_indices = evaluation_indices.detach().cpu().numpy()
-
-    images_per_class = Counter(adaptation_labels.detach().cpu().numpy().tolist())
-
-    # find all candidate points
-    (cand_indices, cand_labels) = dataset.load_candidates(
-        adaptation_indices, evaluation_indices, adaptation_labels) # cand_labels: task labels (0~ways)
-    random_indices = np.random.choice(
-        len(cand_indices), replace=False, size=int(len(cand_indices) * cand_ratio))
-    cand_indices, cand_labels = cand_indices[random_indices], cand_labels[random_indices]
-
-    # pdb.set_trace()
-
-    if features is not None:
-        features.eval()
-        batch_size = 840
-        # total_data = dataset[cand_indices][0]
-        total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
-                                 dataset[0][0].shape[2])
-        for idx, x in enumerate(cand_indices):
-            total_data[idx] = dataset[x][0]
-
-        phi_total = []
-        for i in range(0, total_data.shape[0], batch_size):
-            phi = features(total_data[i:i+batch_size].cuda())
-            phi_total.append(phi)
-        phi_total = torch.concat(phi_total).double()
-        features.train()
-    else:
-        batch_size = 840
-        # total_data = dataset[cand_indices][0]
-        total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
-                                 dataset[0][0].shape[2])
-        for idx, x in enumerate(cand_indices):
-            total_data[idx] = dataset[x][0]
-        phi_total = []
-        for i in range(0, total_data.shape[0], batch_size):
-            phi = kernel_grads_fast(
-                    grad_vmap, total_data[i:i+batch_size].cuda(), params, buffers).double() # phi: (N, d)
-            phi_total.append(phi)
-        phi_total = torch.concat(phi_total).double()
-
-
-    selected_indices, selected_labels = [], []
-    if per_class:
-        for cls in images_per_class.keys():
-            num_query = images_per_class[cls]
-            cls_cand_indices = cand_indices[cand_labels==cls]
-            cls_cand_bool = cand_labels==cls
-            phi = phi_total[cls_cand_bool]
-
-            _, S, Vh = torch.linalg.svd(phi.T, full_matrices=False) # U: dxN, S: NxN, Vh: NxN
-            eig_val, eig_vector = (S**2).detach().cpu().numpy(), (Vh.T).detach().cpu().numpy()
-            DPP = FiniteDPP('likelihood', **{'L_eig_dec': (eig_val, eig_vector)})
-
-            dpp_idx = DPP.sample_exact_k_dpp(size=num_query)
-
-            selected_idx = cls_cand_indices[dpp_idx]
-            selected_indices.append(selected_idx)
-            selected_labels += [cls] * num_query
-        selected_indices = np.concatenate(selected_indices)
-    else:
-        _, S, Vh = torch.linalg.svd(phi_total.T, full_matrices=False) # U: dxN, S: NxN, Vh: NxN
-        eig_val, eig_vector = (S**2).detach().cpu().numpy(), (Vh.T).detach().cpu().numpy()
-        DPP = FiniteDPP('likelihood', **{'L_eig_dec': (eig_val, eig_vector)})
-
-        dpp_idx = DPP.sample_exact_k_dpp(size=ways * train_shots)
-        selected_indices = cand_indices[dpp_idx]
-        selected_labels = cand_labels[dpp_idx]
-
-    data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
-    for idx, x in enumerate(selected_indices):
-        data_support[idx] = dataset[x][0]
-    data_query = evaluation_data
-    labels_support = torch.tensor(selected_labels)
-    labels_query = evaluation_labels
-
-    return data_support, labels_support, data_query, labels_query
+# @torch.no_grad()
+# def active_dpp(learner, dataset, data, labels, indices, ways, features, train_shots, test_shots,
+#                cand_ratio=0.25, per_class=False):
+#     learner.eval()
+#     fmodel, params, buffers = make_functional_with_buffers(learner)
+#
+#     def _compute_loss(params, buffers, sample):
+#         batch = sample.unsqueeze(0)
+#         loss = torch.sum(fmodel(params, buffers, batch)) # sum to make 0-dim tensor
+#         return loss
+#
+#     ft_compute_grad = grad(_compute_loss)
+#     grad_vmap = vmap(ft_compute_grad, in_dims=(None, None, 0))
+#
+#     # data, labels, indices = batch
+#
+#     adaptation_indices_bool = np.zeros(len(indices), dtype=bool)
+#     selection = np.arange(ways) * (train_shots + test_shots)
+#     for offset in range(train_shots):
+#         adaptation_indices_bool[selection + offset] = True
+#     evaluation_indices_bool = ~adaptation_indices_bool
+#     adaptation_labels, adaptation_indices =\
+#         labels[adaptation_indices_bool], indices[adaptation_indices_bool]
+#     evaluation_data, evaluation_labels, evaluation_indices =\
+#         data[evaluation_indices_bool], labels[evaluation_indices_bool], indices[evaluation_indices_bool]
+#     evaluation_indices = evaluation_indices.detach().cpu().numpy()
+#
+#     images_per_class = Counter(adaptation_labels.detach().cpu().numpy().tolist())
+#
+#     # find all candidate points
+#     (cand_indices, cand_labels) = dataset.load_candidates(
+#         adaptation_indices, evaluation_indices, adaptation_labels) # cand_labels: task labels (0~ways)
+#     random_indices = np.random.choice(
+#         len(cand_indices), replace=False, size=int(len(cand_indices) * cand_ratio))
+#     cand_indices, cand_labels = cand_indices[random_indices], cand_labels[random_indices]
+#
+#     # pdb.set_trace()
+#
+#     if features is not None:
+#         features.eval()
+#         batch_size = 840
+#         # total_data = dataset[cand_indices][0]
+#         total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
+#                                  dataset[0][0].shape[2])
+#         for idx, x in enumerate(cand_indices):
+#             total_data[idx] = dataset[x][0]
+#
+#         phi_total = []
+#         for i in range(0, total_data.shape[0], batch_size):
+#             phi = features(total_data[i:i+batch_size].cuda())
+#             phi_total.append(phi)
+#         phi_total = torch.concat(phi_total).double()
+#         features.train()
+#     else:
+#         batch_size = 840
+#         # total_data = dataset[cand_indices][0]
+#         total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
+#                                  dataset[0][0].shape[2])
+#         for idx, x in enumerate(cand_indices):
+#             total_data[idx] = dataset[x][0]
+#         phi_total = []
+#         for i in range(0, total_data.shape[0], batch_size):
+#             phi = kernel_grads_fast(
+#                     grad_vmap, total_data[i:i+batch_size].cuda(), params, buffers).double() # phi: (N, d)
+#             phi_total.append(phi)
+#         phi_total = torch.concat(phi_total).double()
+#
+#
+#     selected_indices, selected_labels = [], []
+#     if per_class:
+#         for cls in images_per_class.keys():
+#             num_query = images_per_class[cls]
+#             cls_cand_indices = cand_indices[cand_labels==cls]
+#             cls_cand_bool = cand_labels==cls
+#             phi = phi_total[cls_cand_bool]
+#
+#             _, S, Vh = torch.linalg.svd(phi.T, full_matrices=False) # U: dxN, S: NxN, Vh: NxN
+#             eig_val, eig_vector = (S**2).detach().cpu().numpy(), (Vh.T).detach().cpu().numpy()
+#             DPP = FiniteDPP('likelihood', **{'L_eig_dec': (eig_val, eig_vector)})
+#
+#             dpp_idx = DPP.sample_exact_k_dpp(size=num_query)
+#
+#             selected_idx = cls_cand_indices[dpp_idx]
+#             selected_indices.append(selected_idx)
+#             selected_labels += [cls] * num_query
+#         selected_indices = np.concatenate(selected_indices)
+#     else:
+#         _, S, Vh = torch.linalg.svd(phi_total.T, full_matrices=False) # U: dxN, S: NxN, Vh: NxN
+#         eig_val, eig_vector = (S**2).detach().cpu().numpy(), (Vh.T).detach().cpu().numpy()
+#         DPP = FiniteDPP('likelihood', **{'L_eig_dec': (eig_val, eig_vector)})
+#
+#         dpp_idx = DPP.sample_exact_k_dpp(size=ways * train_shots)
+#         selected_indices = cand_indices[dpp_idx]
+#         selected_labels = cand_labels[dpp_idx]
+#
+#     data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+#     for idx, x in enumerate(selected_indices):
+#         data_support[idx] = dataset[x][0]
+#     data_query = evaluation_data
+#     labels_support = torch.tensor(selected_labels)
+#     labels_query = evaluation_labels
+#
+#     return data_support, labels_support, data_query, labels_query
 
 
 @torch.no_grad()
@@ -572,89 +572,89 @@ def active_typiclust(learner, dataset, data, labels, indices, ways, features, tr
     return data_support, labels_support, data_query, labels_query
 
 
-@torch.no_grad()
-def active_gmm(learner, dataset, data, labels, indices, ways, features, train_shots, test_shots,
-               cand_ratio=0.5, per_class=False):
-
-    adaptation_indices_bool = np.zeros(len(indices), dtype=bool)
-    selection = np.arange(ways) * (train_shots + test_shots)
-    for offset in range(train_shots):
-        adaptation_indices_bool[selection + offset] = True
-    evaluation_indices_bool = ~adaptation_indices_bool
-    adaptation_labels, adaptation_indices =\
-        labels[adaptation_indices_bool], indices[adaptation_indices_bool]
-    evaluation_data, evaluation_labels, evaluation_indices =\
-        data[evaluation_indices_bool], labels[evaluation_indices_bool], indices[evaluation_indices_bool]
-    evaluation_indices = evaluation_indices.detach().cpu().numpy()
-
-    images_per_class = Counter(adaptation_labels.detach().cpu().numpy().tolist())
-
-    # find all candidate points
-    (cand_indices, cand_labels) = dataset.load_candidates(
-        adaptation_indices, evaluation_indices, adaptation_labels) # cand_labels: task labels (0~ways)
-    sorted_indices = np.argsort(cand_indices)
-    cand_indices, cand_labels = cand_indices[sorted_indices], cand_labels[sorted_indices]
-    random_indices = np.random.choice(
-        len(cand_indices), replace=False, size=int(len(cand_indices) * cand_ratio))
-    cand_indices, cand_labels = cand_indices[random_indices], cand_labels[random_indices]
-
-    features.eval()
-    # total_data = dataset[cand_indices][0]
-
-    total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
-    for idx, x in enumerate(cand_indices):
-        total_data[idx] = dataset[x][0]
-
-    phi_total = []
-    for i in range(0, total_data.shape[0], 64):
-        phi = features(total_data[i:i+64].cuda())
-        phi_total.append(phi)
-    phi_total = torch.cat(phi_total)
-
-    selected_indices, selected_labels = [], []
-
-    if per_class:
-        for cls in images_per_class.keys():
-            num_query = images_per_class[cls]
-            cls_cand_indices = cand_indices[cand_labels==cls]
-            phi = phi_total[cand_labels==cls] # phi: (N, d)
-
-            gmm = GaussianMixture(
-                n_components=num_query, n_features=phi.shape[1], covariance_type="diag").cuda()
-            gmm.fit(phi, n_iter=100)
-            gmm_idx = gmm.get_nearest_samples(phi).detach().cpu().numpy()
-
-            selected_idx = cls_cand_indices[gmm_idx]
-            selected_indices.append(selected_idx)
-            selected_labels += [cls] * num_query
-        selected_indices = np.concatenate(selected_indices)
-    else:
-        gmm = GaussianMixture(
-            n_components=ways * train_shots, n_features=phi_total.shape[1], covariance_type="diag").cuda()
-        gmm.fit(phi_total, n_iter=100)
-        gmm_idx = gmm.get_nearest_samples(phi_total).detach().cpu().numpy()
-
-        selected_indices = cand_indices[gmm_idx]
-        selected_labels = cand_labels[gmm_idx]
-
-    data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
-    for idx, x in enumerate(selected_indices):
-        data_support[idx] = dataset[x][0]
-
-    # data_support = dataset[selected_indices][0]
-    data_query = evaluation_data
-    labels_support = torch.tensor(selected_labels)
-    labels_query = evaluation_labels
-
-    # data[adaptation_indices_bool] = dataset[selected_indices][0]
-    # data[evaluation_indices_bool] = evaluation_data
-    # labels[adaptation_indices_bool] = torch.tensor(selected_labels)
-    # labels[evaluation_indices_bool] = evaluation_labels
-    # indices[adaptation_indices_bool] = torch.from_numpy(selected_indices)
-    # indices[evaluation_indices_bool] = torch.from_numpy(evaluation_indices)
-    # batch = (data, labels, indices)
-    features.train()
-    return data_support, labels_support, data_query, labels_query
+# @torch.no_grad()
+# def active_gmm(learner, dataset, data, labels, indices, ways, features, train_shots, test_shots,
+#                cand_ratio=0.5, per_class=False):
+#
+#     adaptation_indices_bool = np.zeros(len(indices), dtype=bool)
+#     selection = np.arange(ways) * (train_shots + test_shots)
+#     for offset in range(train_shots):
+#         adaptation_indices_bool[selection + offset] = True
+#     evaluation_indices_bool = ~adaptation_indices_bool
+#     adaptation_labels, adaptation_indices =\
+#         labels[adaptation_indices_bool], indices[adaptation_indices_bool]
+#     evaluation_data, evaluation_labels, evaluation_indices =\
+#         data[evaluation_indices_bool], labels[evaluation_indices_bool], indices[evaluation_indices_bool]
+#     evaluation_indices = evaluation_indices.detach().cpu().numpy()
+#
+#     images_per_class = Counter(adaptation_labels.detach().cpu().numpy().tolist())
+#
+#     # find all candidate points
+#     (cand_indices, cand_labels) = dataset.load_candidates(
+#         adaptation_indices, evaluation_indices, adaptation_labels) # cand_labels: task labels (0~ways)
+#     sorted_indices = np.argsort(cand_indices)
+#     cand_indices, cand_labels = cand_indices[sorted_indices], cand_labels[sorted_indices]
+#     random_indices = np.random.choice(
+#         len(cand_indices), replace=False, size=int(len(cand_indices) * cand_ratio))
+#     cand_indices, cand_labels = cand_indices[random_indices], cand_labels[random_indices]
+#
+#     features.eval()
+#     # total_data = dataset[cand_indices][0]
+#
+#     total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+#     for idx, x in enumerate(cand_indices):
+#         total_data[idx] = dataset[x][0]
+#
+#     phi_total = []
+#     for i in range(0, total_data.shape[0], 64):
+#         phi = features(total_data[i:i+64].cuda())
+#         phi_total.append(phi)
+#     phi_total = torch.cat(phi_total)
+#
+#     selected_indices, selected_labels = [], []
+#
+#     if per_class:
+#         for cls in images_per_class.keys():
+#             num_query = images_per_class[cls]
+#             cls_cand_indices = cand_indices[cand_labels==cls]
+#             phi = phi_total[cand_labels==cls] # phi: (N, d)
+#
+#             gmm = GaussianMixture(
+#                 n_components=num_query, n_features=phi.shape[1], covariance_type="diag").cuda()
+#             gmm.fit(phi, n_iter=100)
+#             gmm_idx = gmm.get_nearest_samples(phi).detach().cpu().numpy()
+#
+#             selected_idx = cls_cand_indices[gmm_idx]
+#             selected_indices.append(selected_idx)
+#             selected_labels += [cls] * num_query
+#         selected_indices = np.concatenate(selected_indices)
+#     else:
+#         gmm = GaussianMixture(
+#             n_components=ways * train_shots, n_features=phi_total.shape[1], covariance_type="diag").cuda()
+#         gmm.fit(phi_total, n_iter=100)
+#         gmm_idx = gmm.get_nearest_samples(phi_total).detach().cpu().numpy()
+#
+#         selected_indices = cand_indices[gmm_idx]
+#         selected_labels = cand_labels[gmm_idx]
+#
+#     data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+#     for idx, x in enumerate(selected_indices):
+#         data_support[idx] = dataset[x][0]
+#
+#     # data_support = dataset[selected_indices][0]
+#     data_query = evaluation_data
+#     labels_support = torch.tensor(selected_labels)
+#     labels_query = evaluation_labels
+#
+#     # data[adaptation_indices_bool] = dataset[selected_indices][0]
+#     # data[evaluation_indices_bool] = evaluation_data
+#     # labels[adaptation_indices_bool] = torch.tensor(selected_labels)
+#     # labels[evaluation_indices_bool] = evaluation_labels
+#     # indices[adaptation_indices_bool] = torch.from_numpy(selected_indices)
+#     # indices[evaluation_indices_bool] = torch.from_numpy(evaluation_indices)
+#     # batch = (data, labels, indices)
+#     features.train()
+#     return data_support, labels_support, data_query, labels_query
 
 
 
@@ -920,123 +920,123 @@ def active_margin(learner, dataset, batch, ways, features, train_shots, test_sho
         features.train()
     return batch
 
-@torch.no_grad()
-def active_ent(learner, dataset, data, labels, indices, ways, features, train_shots, test_shots,
-               cand_ratio=0.25, per_class=False):
-    learner.eval()
-
-    adaptation_indices_bool = np.zeros(len(indices), dtype=bool)
-    selection = np.arange(ways) * (train_shots + test_shots)
-    for offset in range(train_shots):
-        adaptation_indices_bool[selection + offset] = True
-    evaluation_indices_bool = ~adaptation_indices_bool
-    adaptation_labels, adaptation_indices =\
-        labels[adaptation_indices_bool], indices[adaptation_indices_bool]
-    evaluation_data, evaluation_labels, evaluation_indices =\
-        data[evaluation_indices_bool], labels[evaluation_indices_bool], indices[evaluation_indices_bool]
-    evaluation_indices = evaluation_indices.detach().cpu().numpy()
-
-    images_per_class = Counter(adaptation_labels.detach().cpu().numpy().tolist())
-
-    # find all candidate points
-    (cand_indices, cand_labels) = dataset.load_candidates(adaptation_indices, evaluation_indices, adaptation_labels) # cand_labels: task labels (0~ways)
-    sorted_indices = np.argsort(cand_indices)
-    cand_indices, cand_labels = cand_indices[sorted_indices], cand_labels[sorted_indices]
-    random_indices = np.random.choice(
-        len(cand_indices), replace=False, size=int(len(cand_indices) * cand_ratio))
-    cand_indices, cand_labels = cand_indices[random_indices], cand_labels[random_indices]
-
-    cand_indices = cand_indices.tolist()
-
-    if features is not None:
-        features.eval()
-        # batch_size = 840
-
-        total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
-
-        for idx, x in enumerate(cand_indices):
-            total_data[idx] = dataset[x][0]
-            # total_label[idx] = cand_labels[x]
-
-        # phi_total = []
-        # for i in range(0, total_data.shape[0], batch_size):
-        #     print(total_data.shape)
-        #     phi = features(total_data[i:i+batch_size].cuda())
-        #     # print(phi.shape)
-        #     phi_total.append(phi)
-
-        # phi_total = torch.concat(phi_total)
-        # print(phi_total.shape)
-        phi_total = features(total_data.cuda())
-
-        phi_total = phi_total.view(1, -1, 2560)
-
-        phi_labels = cand_labels.reshape(1,-1)
-        phi_labels = torch.from_numpy(phi_labels).cuda()
-
-        logits_total = learner(phi_total[:,5*15+1:,:], phi_total[:,:5*15,:], phi_labels[:,:5*15], 5, 15)
-        probs = F.softmax(logits_total, dim=-1)
-
-        cand_labels = cand_labels.reshape(-1)
-    # else:
-    #     batch_size = 840
-    #     total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
-    #     for idx, x in enumerate(cand_indices):
-    #         total_data[idx] = dataset[x][0]
-    #
-    #     logits_total = []
-    #     for i in range(0, total_data.shape[0], batch_size):
-    #         logits = learner(phi_total[i:i+int(batch_size*0.75)], phi_total[i+int(batch_size*0.75)+1:i+batch_size], cand_labels[i+int(batch_size*0.75)+1:i+batch_size], 5, 15)
-    #         #logits = learner(total_data[i:i+batch_size].cuda())
-    #         logits_total.append(logits)
-    #     logits_total = torch.concat(logits_total)
-    #     probs = F.softmax(logits_total, dim=-1)
-
-    entropies = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1)
-
-    selected_indices, selected_labels = [], []
-    if per_class:
-        for cls in images_per_class.keys():
-            num_query = images_per_class[cls]
-            cls_cand_indices = cand_indices[cand_labels==cls]
-            entropy = entropies[cand_labels==cls] # phi: (N, d)
-
-            _, entropy_idx = torch.topk(entropy, k=num_query, largest=True)
-            entropy_idx = entropy_idx.detach().cpu().numpy()
-
-            selected_idx = cls_cand_indices[entropy_idx]
-            selected_indices.append(selected_idx)
-            selected_labels += [cls] * num_query
-        selected_indices = np.concatenate(selected_indices)
-    else:
-        _, entropy_idx = torch.topk(entropies, k=ways * train_shots, largest=True)
-        entropy_idx = entropy_idx.detach().cpu().numpy()
-        # pdb.set_trace()
-        selected_indices = cand_indices[entropy_idx]
-        selected_labels = cand_labels[entropy_idx]
-
-    data = torch.zeros_like(data)
-    labels = torch.zeros_like(labels)
-    indices = torch.zeros_like(indices)
-
-    data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
-    for idx, x in enumerate(selected_indices):
-        data_support[idx] = dataset[x][0]
-
-    data_query = evaluation_data
-    labels_support = torch.tensor(selected_labels)
-    labels_query = labels[evaluation_indices_bool] = evaluation_labels
-
-    # data[adaptation_indices_bool] = dataset[selected_indices][0]
-    # data[evaluation_indices_bool] = evaluation_data
-    # labels[adaptation_indices_bool] = torch.tensor(selected_labels)
-    # labels[evaluation_indices_bool] = evaluation_labels
-    # indices[adaptation_indices_bool] = torch.tensor(selected_indices)
-    # indices[evaluation_indices_bool] = torch.tensor(evaluation_indices)
-    # batch = (data, labels, indices)
-    if features is not None:
-        features.train()
-    return data_support, labels_support, data_query, labels_query
+# @torch.no_grad()
+# def active_ent(learner, dataset, data, labels, indices, ways, features, train_shots, test_shots,
+#                cand_ratio=0.25, per_class=False):
+#     learner.eval()
+#
+#     adaptation_indices_bool = np.zeros(len(indices), dtype=bool)
+#     selection = np.arange(ways) * (train_shots + test_shots)
+#     for offset in range(train_shots):
+#         adaptation_indices_bool[selection + offset] = True
+#     evaluation_indices_bool = ~adaptation_indices_bool
+#     adaptation_labels, adaptation_indices =\
+#         labels[adaptation_indices_bool], indices[adaptation_indices_bool]
+#     evaluation_data, evaluation_labels, evaluation_indices =\
+#         data[evaluation_indices_bool], labels[evaluation_indices_bool], indices[evaluation_indices_bool]
+#     evaluation_indices = evaluation_indices.detach().cpu().numpy()
+#
+#     images_per_class = Counter(adaptation_labels.detach().cpu().numpy().tolist())
+#
+#     # find all candidate points
+#     (cand_indices, cand_labels) = dataset.load_candidates(adaptation_indices, evaluation_indices, adaptation_labels) # cand_labels: task labels (0~ways)
+#     sorted_indices = np.argsort(cand_indices)
+#     cand_indices, cand_labels = cand_indices[sorted_indices], cand_labels[sorted_indices]
+#     random_indices = np.random.choice(
+#         len(cand_indices), replace=False, size=int(len(cand_indices) * cand_ratio))
+#     cand_indices, cand_labels = cand_indices[random_indices], cand_labels[random_indices]
+#
+#     cand_indices = cand_indices.tolist()
+#
+#     if features is not None:
+#         features.eval()
+#         # batch_size = 840
+#
+#         total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+#
+#         for idx, x in enumerate(cand_indices):
+#             total_data[idx] = dataset[x][0]
+#             # total_label[idx] = cand_labels[x]
+#
+#         # phi_total = []
+#         # for i in range(0, total_data.shape[0], batch_size):
+#         #     print(total_data.shape)
+#         #     phi = features(total_data[i:i+batch_size].cuda())
+#         #     # print(phi.shape)
+#         #     phi_total.append(phi)
+#
+#         # phi_total = torch.concat(phi_total)
+#         # print(phi_total.shape)
+#         phi_total = features(total_data.cuda())
+#
+#         phi_total = phi_total.view(1, -1, 2560)
+#
+#         phi_labels = cand_labels.reshape(1,-1)
+#         phi_labels = torch.from_numpy(phi_labels).cuda()
+#
+#         logits_total = learner(phi_total[:,5*15+1:,:], phi_total[:,:5*15,:], phi_labels[:,:5*15], 5, 15)
+#         probs = F.softmax(logits_total, dim=-1)
+#
+#         cand_labels = cand_labels.reshape(-1)
+#     # else:
+#     #     batch_size = 840
+#     #     total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+#     #     for idx, x in enumerate(cand_indices):
+#     #         total_data[idx] = dataset[x][0]
+#     #
+#     #     logits_total = []
+#     #     for i in range(0, total_data.shape[0], batch_size):
+#     #         logits = learner(phi_total[i:i+int(batch_size*0.75)], phi_total[i+int(batch_size*0.75)+1:i+batch_size], cand_labels[i+int(batch_size*0.75)+1:i+batch_size], 5, 15)
+#     #         #logits = learner(total_data[i:i+batch_size].cuda())
+#     #         logits_total.append(logits)
+#     #     logits_total = torch.concat(logits_total)
+#     #     probs = F.softmax(logits_total, dim=-1)
+#
+#     entropies = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1)
+#
+#     selected_indices, selected_labels = [], []
+#     if per_class:
+#         for cls in images_per_class.keys():
+#             num_query = images_per_class[cls]
+#             cls_cand_indices = cand_indices[cand_labels==cls]
+#             entropy = entropies[cand_labels==cls] # phi: (N, d)
+#
+#             _, entropy_idx = torch.topk(entropy, k=num_query, largest=True)
+#             entropy_idx = entropy_idx.detach().cpu().numpy()
+#
+#             selected_idx = cls_cand_indices[entropy_idx]
+#             selected_indices.append(selected_idx)
+#             selected_labels += [cls] * num_query
+#         selected_indices = np.concatenate(selected_indices)
+#     else:
+#         _, entropy_idx = torch.topk(entropies, k=ways * train_shots, largest=True)
+#         entropy_idx = entropy_idx.detach().cpu().numpy()
+#         # pdb.set_trace()
+#         selected_indices = cand_indices[entropy_idx]
+#         selected_labels = cand_labels[entropy_idx]
+#
+#     data = torch.zeros_like(data)
+#     labels = torch.zeros_like(labels)
+#     indices = torch.zeros_like(indices)
+#
+#     data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+#     for idx, x in enumerate(selected_indices):
+#         data_support[idx] = dataset[x][0]
+#
+#     data_query = evaluation_data
+#     labels_support = torch.tensor(selected_labels)
+#     labels_query = labels[evaluation_indices_bool] = evaluation_labels
+#
+#     # data[adaptation_indices_bool] = dataset[selected_indices][0]
+#     # data[evaluation_indices_bool] = evaluation_data
+#     # labels[adaptation_indices_bool] = torch.tensor(selected_labels)
+#     # labels[evaluation_indices_bool] = evaluation_labels
+#     # indices[adaptation_indices_bool] = torch.tensor(selected_indices)
+#     # indices[evaluation_indices_bool] = torch.tensor(evaluation_indices)
+#     # batch = (data, labels, indices)
+#     if features is not None:
+#         features.train()
+#     return data_support, labels_support, data_query, labels_query
 
 
 
@@ -1287,18 +1287,143 @@ def active_coreset(learner, dataset, data, labels, indices, ways, features, trai
 
 
 @torch.no_grad()
-def active_random(dataset, cand_indices, query, query_labels, ways, train_shots):
+def active_random(dataset, cand_indices, query, query_labels, ways, train_shots, episode):
 
     random_idx = np.random.choice(
-        len(cand_indices), size=8*ways * train_shots, replace=False)   # 8 is the episode per batch
+        len(cand_indices), size=episode*ways * train_shots, replace=False)   # 8 is the episode per batch
 
     selected_idx = [cand_indices[i] for i in random_idx]
 
     data_support = torch.randn(len(selected_idx), dataset[0][0].shape[0], dataset[0][0].shape[1],
                                dataset[0][0].shape[2])
-    labels_support = torch.randn(len(selected_idx), 1)
+    labels_support = torch.randn(len(selected_idx))
 
     for idx, x in enumerate(selected_idx):
+        data_support[idx] = dataset[x][0]
+        labels_support[idx] = dataset[x][1]
+
+    data_query = query
+    labels_query = query_labels
+
+    return data_support, labels_support, data_query, labels_query
+
+@torch.no_grad()
+def active_gmm(features, dataset, cand_indices, query, query_labels, ways, train_shots, cand_ratio=0.5):
+
+    # find all candidate points
+    random_idx = np.random.choice(
+        len(cand_indices), size=int(len(cand_indices) * cand_ratio), replace=False)   # 8 is the episode per batch
+    cand_indices = [cand_indices[i] for i in random_idx]
+
+    features.eval()
+
+    total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+    for idx, x in enumerate(cand_indices):
+        total_data[idx] = dataset[x][0]
+
+    phi_total = []
+    for i in range(0, total_data.shape[0], 64):
+        phi = features(total_data[i:i+64].cuda())
+        phi_total.append(phi)
+    phi_total = torch.cat(phi_total)
+
+    gmm = GaussianMixture(
+        n_components=ways * train_shots, n_features=phi_total.shape[1], covariance_type="diag").cuda()
+    gmm.fit(phi_total, n_iter=100)
+    gmm_idx = gmm.get_nearest_samples(phi_total).detach().cpu().numpy()
+
+    selected_indices = cand_indices[gmm_idx]
+
+    data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
+                               dataset[0][0].shape[2])
+    labels_support = torch.randn(len(selected_idx), 1)
+
+    for idx, x in enumerate(selected_indices):
+        data_support[idx] = dataset[x][0]
+        labels_support[idx] = dataset[x][1]
+
+    data_query = query
+    labels_query = query_labels
+
+    features.train()
+
+    return data_support, labels_support, data_query, labels_query
+
+@torch.no_grad()
+def active_dpp(features, dataset, cand_indices, query, query_labels, ways, train_shots, cand_ratio=0.5):
+    # find all candidate points
+    random_idx = np.random.choice(
+        len(cand_indices), size=int(len(cand_indices) * cand_ratio), replace=False)   # 8 is the episode per batch
+    cand_indices = [cand_indices[i] for i in random_idx]
+
+    features.eval()
+
+    total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+    for idx, x in enumerate(cand_indices):
+        total_data[idx] = dataset[x][0]
+
+    phi_total = []
+    for i in range(0, total_data.shape[0], 64):
+        phi = features(total_data[i:i+64].cuda())
+        phi_total.append(phi)
+    phi_total = torch.cat(phi_total).double()
+
+    _, S, Vh = torch.linalg.svd(phi_total.T, full_matrices=False) # U: dxN, S: NxN, Vh: NxN
+    eig_val, eig_vector = (S**2).detach().cpu().numpy(), (Vh.T).detach().cpu().numpy()
+    DPP = FiniteDPP('likelihood', **{'L_eig_dec': (eig_val, eig_vector)})
+
+    dpp_idx = DPP.sample_exact_k_dpp(size=ways * train_shots)
+
+    selected_indices = cand_indices[dpp_idx]
+
+    data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
+                               dataset[0][0].shape[2])
+    labels_support = torch.randn(len(selected_indices), 1)
+
+    for idx, x in enumerate(selected_indices):
+        data_support[idx] = dataset[x][0]
+        labels_support[idx] = dataset[x][1]
+
+    data_query = query
+    labels_query = query_labels
+
+    return data_support, labels_support, data_query, labels_query
+
+@torch.no_grad()
+def active_ent(features, learner, dataset, cand_indices, query, query_labels, ways, train_shots, cand_ratio=0.5):
+
+    learner.eval()
+
+    # find all candidate points
+    random_idx = np.random.choice(
+        len(cand_indices), size=int(len(cand_indices) * cand_ratio), replace=False)   # 8 is the episode per batch
+    cand_indices = [cand_indices[i] for i in random_idx]
+
+    features.eval()
+
+    total_data = torch.randn(len(cand_indices), dataset[0][0].shape[0], dataset[0][0].shape[1], dataset[0][0].shape[2])
+    for idx, x in enumerate(cand_indices):
+        total_data[idx] = dataset[x][0]
+
+    phi_total = []
+    for i in range(0, total_data.shape[0], 64):
+        phi = features(total_data[i:i+64].cuda())
+        phi_total.append(phi)
+    phi_total = torch.cat(phi_total).double()
+    logits_total = learner(phi_total[:,5*15+1:,:], phi_total[:,:5*15,:], phi_labels[:,:5*15], 5, 15)
+    probs = F.softmax(logits_total, dim=-1)
+    entropies = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1)
+
+    _, entropy_idx = torch.topk(entropies, k=ways * train_shots, largest=True)
+    entropy_idx = entropy_idx.detach().cpu().numpy()
+
+    selected_indices = cand_indices[entropy_idx]
+
+    data_support = torch.randn(len(selected_indices), dataset[0][0].shape[0], dataset[0][0].shape[1],
+                               dataset[0][0].shape[2])
+    labels_support = torch.randn(len(selected_indices), 1)
+
+    for idx, x in enumerate(selected_indices):
         data_support[idx] = dataset[x][0]
         labels_support[idx] = dataset[x][1]
 
